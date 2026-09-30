@@ -1,0 +1,24 @@
+# Build and executable outputs
+build/
+bin/
+*.o
+*.out
+*.exe
+
+# Logs and runtime outputs
+output.txt
+meter_log.csv
+*.log
+
+# Editor and IDE
+.vscode/
+.idea/
+
+# Linux Kernel Driver artifacts
+driver/*.ko
+driver/*.mod*
+driver/*.o
+driver/modules.order
+driver/Module.symvers
+driver/.tmp_versions/
+driver/.*.cmd
