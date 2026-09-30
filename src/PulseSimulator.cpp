@@ -3,21 +3,36 @@
 #include <algorithm>
 
 PulseSimulator::PulseSimulator(PulseCounter& cnt, double constMeter, double accel)
-    : counter(cnt), meterConstant(constMeter), timeAcceleration(accel), currentLoadKW(0.0), running(false) {}
+    : counter(cnt), meterConstant(constMeter), timeAcceleration(accel), currentIntervalMs(1125.0), running(false) {}
 
 PulseSimulator::~PulseSimulator() {
     stop();
 }
 
 void PulseSimulator::start(double initialLoadKW) {
+    setLoad(initialLoadKW);
     if (running.load()) return;
-    currentLoadKW.store(initialLoadKW);
+    running.store(true);
+    workerThread = std::thread(&PulseSimulator::runSimulation, this);
+}
+
+void PulseSimulator::startFixedInterval(double intervalSeconds) {
+    setIntervalSeconds(intervalSeconds);
+    if (running.load()) return;
     running.store(true);
     workerThread = std::thread(&PulseSimulator::runSimulation, this);
 }
 
 void PulseSimulator::setLoad(double loadKW) {
-    currentLoadKW.store(std::max(0.0, loadKW));
+    double safeLoad = std::max(0.001, loadKW);
+    // interval (ms) = (3600 * 1000) / (loadKW * meterConstant)
+    double intervalMs = (3600.0 * 1000.0) / (safeLoad * meterConstant);
+    currentIntervalMs.store(intervalMs);
+}
+
+void PulseSimulator::setIntervalSeconds(double intervalSec) {
+    double safeSec = std::max(0.005, intervalSec);
+    currentIntervalMs.store(safeSec * 1000.0);
 }
 
 void PulseSimulator::stop() {
@@ -38,24 +53,19 @@ bool PulseSimulator::isRunning() const {
 }
 
 double PulseSimulator::getCurrentLoadKW() const {
-    return currentLoadKW.load();
+    double intervalMs = currentIntervalMs.load();
+    if (intervalMs <= 0.0) return 0.0;
+    return (3600.0 * 1000.0) / (intervalMs * meterConstant);
+}
+
+double PulseSimulator::getCurrentIntervalSeconds() const {
+    return currentIntervalMs.load() / 1000.0;
 }
 
 void PulseSimulator::runSimulation() {
     while (running.load()) {
-        double load = currentLoadKW.load();
-        if (load <= 0.0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
-        }
-
-        // Pulses per hour = load (kW) * meterConstant (imp/kWh)
-        // Pulses per second = (load * meterConstant) / 3600
-        // Interval between pulses in ms = (3600 * 1000) / (load * meterConstant * acceleration)
-        double intervalMs = (3600.0 * 1000.0) / (load * meterConstant * timeAcceleration);
-        
-        // Clamp minimum interval to 10 ms to prevent CPU starvation
-        if (intervalMs < 10.0) intervalMs = 10.0;
+        double intervalMs = currentIntervalMs.load() / timeAcceleration;
+        if (intervalMs < 5.0) intervalMs = 5.0; // clamp to 5ms min
 
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(intervalMs)));
 
